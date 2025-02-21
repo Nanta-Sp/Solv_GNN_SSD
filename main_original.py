@@ -2,16 +2,11 @@ import tensorflow as tf
 import time
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
-if gpus:
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-
 if len(gpus) > 0:
-    strategy = tf.distribute.MirroredStrategy()  # Multi-GPU strategy
+    tf.config.experimental.set_memory_growth(gpus[0], True)
+    device = "/gpu:0"
 else:
-    strategy = tf.distribute.get_strategy()  # Default strategy for single GPU or CPU
-
-print(f"Number of devices: {strategy.num_replicas_in_sync}")
+    device = "/cpu:0"
 
 import os
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
@@ -284,72 +279,98 @@ def main(args):
 
 
 def predict_df(df,args):
+    model = tf.keras.models.load_model('model_files/'+ args.modelname +'/best_model.h5', custom_objects = nfp.custom_objects)
+    preprocessor = CustomPreprocessor(
+        explicit_hs=False,
+        atom_features=atom_features,
+        bond_features=bond_features)
+    preprocessor.from_json('model_files/' + args.modelname +'/preprocessor.json')
+    
+    output_signature = (preprocessor.output_signature,
+                        tf.TensorSpec(shape=(), dtype=tf.float32),
+                        tf.TensorSpec(shape=(), dtype=tf.float32))
 
-    # Load the model within the strategy scope for parallel execution
-    with strategy.scope():
-        model = tf.keras.models.load_model('model_files/'+ args.modelname +'/best_model.h5', custom_objects = nfp.custom_objects)
-        preprocessor = CustomPreprocessor(
-            explicit_hs=False,
-            atom_features=atom_features,
-            bond_features=bond_features)
-        preprocessor.from_json('model_files/' + args.modelname +'/preprocessor.json')
-        
-        output_signature = (preprocessor.output_signature,
-                            tf.TensorSpec(shape=(), dtype=tf.float32),
-                            tf.TensorSpec(shape=(), dtype=tf.float32))
+    df_data = tf.data.Dataset.from_generator(
+        lambda: create_tf_dataset(df, preprocessor, args.sample_weight, False), output_signature=output_signature)\
+        .cache()\
+        .padded_batch(batch_size=len(df))\
+        .prefetch(tf.data.experimental.AUTOTUNE)
 
-        df_data = tf.data.Dataset.from_generator(
-            lambda: create_tf_dataset(df, preprocessor, args.sample_weight, False), output_signature=output_signature)\
-            .cache()\
-            .padded_batch(batch_size=len(df))\
-            .prefetch(tf.data.experimental.AUTOTUNE)
+    pred_results = model.predict(df_data).squeeze()
 
-        pred_results = model.predict(df_data).squeeze()
+    #### This part is for extracting feature (state) vectors (related to shap) ####
+    #extractor = tf.keras.Model(model.inputs, [model.layers[-1].input]) #global feature
+    #for i, layer in enumerate(model.layers):
+    #    print(i, layer.name)
+
+    '''
+    extractor_solvent_af = tf.keras.Model(model.inputs, [model.layers[1].output, 
+                                                         model.layers[0].output,
+                                                         model.layers[15].output,
+                                                         model.layers[12].output])
+    features = extractor_solvent_af.predict(df_data)
+    af = sorted(list(set(np.concatenate((features[0].flatten(), features[1].flatten()), axis=None))))
+    bf = sorted(list(set(np.concatenate((features[2].flatten(), features[3].flatten()), axis=None))))
+
+    print(af)
+    print('------------')
+    print(bf)
+    '''
+     
+    #extractor = tf.keras.Model(model.inputs, [model.layers[-1].input]) #global feature
+    #extractor = tf.keras.Model(model.inputs, [model.layers[-6].output]) #atom features
+    #features = extractor.predict(df_data)
 
     df['predicted'] = pred_results
     return df
 
     ##################
-# edited so main take filename as input
-# Nanta Sep 2024
-# to run: 
-# 1) activate conda env: tf24gpu
-# 2) python main.py -filename data/molecules_to_predict.csv -predict_df -modelname SSD_models/student35
-# 3) output is stored in <filename>_results.csv
+
 if __name__ == '__main__':
+    with tf.device(device):
+        parser = ArgumentParser()
+        parser.add_argument('-lr', type=float, default=1.0e-4, help='Learning rate (default=1.0e-4)')
+        parser.add_argument('-batchsize', type=int, default=1024, help='batch_size (default=1024)')
+        parser.add_argument('-epoch', type=int, default=1000, help='epoch (default=1000)')
+        parser.add_argument('-layers', type=int, default=5, help='number of gnn layers (default=5)')
+        parser.add_argument('-num_hidden', type=int, default=128, help='number of nodes in hidden layers (default=128)')
 
-    parser = ArgumentParser()
-    parser.add_argument('-lr', type=float, default=1.0e-4, help='Learning rate (default=1.0e-4)')
-    parser.add_argument('-batchsize', type=int, default=1024, help='batch_size (default=1024)')
-    parser.add_argument('-epoch', type=int, default=1000, help='epoch (default=1000)')
-    parser.add_argument('-layers', type=int, default=5, help='number of gnn layers (default=5)')
-    parser.add_argument('-num_hidden', type=int, default=128, help='number of nodes in hidden layers (default=128)')
+        parser.add_argument('-random_seed', type=int, default=1, help='random seed number used when splitting the dataset (default=1)')
+        parser.add_argument('-sample_weight', type=float, default=1.0, help='whether to use sample weights (default=0.6) If 1.0 -> no sample weights, if < 1.0 -> sample weights to Tier 2,3 methods')
+        parser.add_argument('-fold_number', type=int, default=0, help='fold number for Kfold')
+        parser.add_argument('-modelname', type=str, default='test_model', help='model name (default=test_model)')
+        parser.add_argument('-data_frac', type=float, default=1.0, help='default=1.0')
+        parser.add_argument('-tfl', action="store_true", default=False, help='If specified, transfer learning is carried out (default=False)')
 
-    parser.add_argument('-random_seed', type=int, default=1, help='random seed number used when splitting the dataset (default=1)')
-    parser.add_argument('-sample_weight', type=float, default=1.0, help='whether to use sample weights (default=0.6) If 1.0 -> no sample weights, if < 1.0 -> sample weights to Tier 2,3 methods')
-    parser.add_argument('-fold_number', type=int, default=0, help='fold number for Kfold')
-    parser.add_argument('-modelname', type=str, default='test_model', help='model name (default=test_model)')
-    parser.add_argument('-data_frac', type=float, default=1.0, help='default=1.0')
-    parser.add_argument('-tfl', action="store_true", default=False, help='If specified, transfer learning is carried out (default=False)')
-
-    ########
-    parser.add_argument('-predict_df', action="store_true", default=False, help='If specified, prediction is carried out for molecules_to_predict.csv (default=False)')
-    
-    parser.add_argument('-chunk_number', type=int, default=0, help='in case one wants to predict a chunk of 10,000 data points among a huge number of data points (>10^4)')
-    parser.add_argument('-dropout', type=float, default=0.0, help='default=0.0')
-    parser.add_argument('-surv_prob', type=float, default=1.0, help='default=1.0')
-    parser.add_argument('-filename', type=str, help='filename')
-    args = parser.parse_args()
+        ########
+        parser.add_argument('-predict_df', action="store_true", default=False, help='If specified, prediction is carried out for molecules_to_predict.csv (default=False)')
+        
+        parser.add_argument('-chunk_number', type=int, default=0, help='in case one wants to predict a chunk of 10,000 data points among a huge number of data points (>10^4)')
+        parser.add_argument('-dropout', type=float, default=0.0, help='default=0.0')
+        parser.add_argument('-surv_prob', type=float, default=1.0, help='default=1.0')
+        args = parser.parse_args()
 
     tic = time.perf_counter()
 
     if args.predict_df:
+        #df = pd.read_csv('noleakyrelu_1M_data_seed2_fold0/temp_for_evaluate_tl.csv')
+        #df = df.sample(frac=0.1, random_state=1)
 
-        df = pd.read_csv(args.filename)
-        #df = df.iloc[10000 * args.chunk_number : 10000 * (args.chunk_number + 1)]
+        #df = pd.read_csv('220607_exp_solu_DB_v2.csv')
+        #df = df[~df.DGsolv.isna()]
+        #print(args.chunk_number)
+
+        df = pd.read_csv('molecules_to_predict.csv')
+        #df = pd.read_csv('prediction_for_appl_examples_220927.csv')
+        #df = pd.read_csv('solvent-solvent-pred.csv')
+        #df = pd.read_csv('prediction_for_appl_examples_221206.csv')
+        #df = df[df.Atom_bond_type_overlap_with_exp == 'Y']
+        #df = pd.read_csv('remaining_after_30pth_student.csv')
+        df = df.iloc[10000 * args.chunk_number : 10000 * (args.chunk_number + 1)]
 
         df2 = predict_df(df,args) 
-        df2.to_csv(args.filename[:-4]+'_results.csv', index=False)
+        #df2.to_csv('prediction_results_control_'+ args.modelname.split('_')[0] +'.csv', index=False)
+        df2.to_csv('molecules_to_predict_results.csv', index=False)
     else:
         import datetime
         start = datetime.datetime.now()
