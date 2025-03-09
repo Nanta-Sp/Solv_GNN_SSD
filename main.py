@@ -314,7 +314,7 @@ def predict_df(df,args):
 # Nanta Sep 2024
 # to run: 
 # 1) activate conda env: tf24gpu
-# 2) python main.py -filename data/molecules_to_predict.csv -predict_df -modelname SSD_models/student35
+# 2) python main.py -filename data/molecules_to_predict.csv -outputfile output.csv -predict_df -modelname SSD_models/student35
 # 3) output is stored in <filename>_results.csv
 if __name__ == '__main__':
 
@@ -339,17 +339,26 @@ if __name__ == '__main__':
     parser.add_argument('-dropout', type=float, default=0.0, help='default=0.0')
     parser.add_argument('-surv_prob', type=float, default=1.0, help='default=1.0')
     parser.add_argument('-filename', type=str, help='filename')
+    parser.add_argument('-fcompress', type=str, default=None, help='type of compression of input file')
+    parser.add_argument('-outputfile', type=str, help='output filename')
     args = parser.parse_args()
 
     tic = time.perf_counter()
+    print("read XXXXXXXXXXXXXXXXXXX")
 
     if args.predict_df:
-
-        df = pd.read_csv(args.filename)
+        print("read XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXx")
+        print(args.filename, args.fcompress)
+        if args.fcompress is None:
+            df = pd.read_csv(args.filename)
+        else:
+            df = pd.read_csv(args.filename, compression=args.fcompress)
+            print("read")
         #df = df.iloc[10000 * args.chunk_number : 10000 * (args.chunk_number + 1)]
 
         df2 = predict_df(df,args) 
-        df2.to_csv(args.filename[:-4]+'_results.csv', index=False)
+        # df2.to_csv(args.outputfile, compression=args.fcompress, index=False)
+        df2.to_csv(args.filename+'_results.csv.gz', compression=args.fcompress, index=False)
     else:
         import datetime
         start = datetime.datetime.now()
@@ -359,3 +368,5 @@ if __name__ == '__main__':
     
     toc = time.perf_counter()
     print(f"Total time: {toc - tic:0.4f} seconds")
+
+    
