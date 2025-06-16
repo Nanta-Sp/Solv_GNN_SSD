@@ -1,0 +1,12 @@
+executor: slurm
+jobs: 1
+latency-wait: 100
+sdm: conda
+
+default-resources:
+  slurm_partition: zimIntel
+  mem_mb: 40000
+  disk_mb: 30000
+  runtime: 7200
+  tasks: 1
+  nodes: 1
