@@ -27,5 +27,7 @@ Next, run
 ```python
 python main.py -predict_df -modelname SSD_models/student35  # any models in the 'model_files' folder can be read for the prediction.
 ```
+The script looks for `molecules_to_predict.csv` by default. If your file has a
+different name, pass it via `-filename <your_file.csv>`.
 
 Then, a user can find 'molecules_to_predict_results.csv' file which contains the predicted Gibbs free energies of solvation. ('predicted' column)

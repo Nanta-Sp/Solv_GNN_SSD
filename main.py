@@ -338,7 +338,8 @@ if __name__ == '__main__':
     parser.add_argument('-chunk_number', type=int, default=0, help='in case one wants to predict a chunk of 10,000 data points among a huge number of data points (>10^4)')
     parser.add_argument('-dropout', type=float, default=0.0, help='default=0.0')
     parser.add_argument('-surv_prob', type=float, default=1.0, help='default=1.0')
-    parser.add_argument('-filename', type=str, help='filename')
+    parser.add_argument('-filename', type=str, default='molecules_to_predict.csv',
+                        help='input CSV file for prediction (default=molecules_to_predict.csv)')
     args = parser.parse_args()
 
     tic = time.perf_counter()
