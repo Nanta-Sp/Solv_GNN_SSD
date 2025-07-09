@@ -2,11 +2,16 @@ executor: slurm
 jobs: 1
 latency-wait: 100
 sdm: conda
+keep-incomplete: true
+keep-going: true
 
 default-resources:
   slurm_partition: zimIntel
-  mem_mb: 40000
-  disk_mb: 30000
+  # slurm_partition: zim2080
+  mem_mb: 80000
+  disk_mb: 64000
   runtime: 7200
-  tasks: 1
+  # tasks: 1
   nodes: 1
+  
+  # gpus: 1
